@@ -1,9 +1,1 @@
-{
-  "name": "Deadlock Incident",
-  "db_logs": "ERROR: Deadlock detected in table Users. Process ID 402 waiting for access. Transaction started at 2024-01-15 14:23:45. Lock wait timeout exceeded. Query: SELECT * FROM Users WHERE id = 123 FOR UPDATE;",
-  "network_logs": "504 Gateway Timeout - Request ID: req-789. Timestamp: 2024-01-15T14:23:47Z. Response time: 2000ms. Load balancer: lb-prod-01. Target server: app-server-03. Connection timeout after 2000ms.",
-  "code_diff": "--- a/src/api/users.py\n+++ b/src/api/users.py\n@@ -45,6 +45,7 @@ def get_user_profile(user_id: int):\n     with db.transaction():\n         user = db.query(User).filter(User.id == user_id).first()\n+        time.sleep(3)  # Added for debugging\n         user_data = fetch_user_metadata(user.id)\n         return serialize_user(user, user_data)"
-}
-
-
 

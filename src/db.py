@@ -138,9 +138,13 @@ def get_active_incidents() -> Dict[str, List[Dict[str, Any]]]:
     if not DB_FILE.exists():
         return {"Network": [], "Database": [], "Code": []}
     
-    conn = sqlite3.connect(DB_FILE)
+    # Use a fresh connection with proper isolation to see latest changes
+    conn = sqlite3.connect(DB_FILE, timeout=10.0)
     conn.row_factory = sqlite3.Row  # Allows accessing columns by name
     c = conn.cursor()
+    
+    # Enable WAL mode for better concurrency (if not already enabled)
+    c.execute("PRAGMA journal_mode=WAL")
     
     # Get all active incidents, ordered by most recent first
     c.execute('''
@@ -187,15 +191,21 @@ def clear_all_incidents() -> int:
     if not DB_FILE.exists():
         return 0
     
-    conn = sqlite3.connect(DB_FILE)
+    # Use isolation_level=None for autocommit mode to ensure immediate visibility
+    conn = sqlite3.connect(DB_FILE, isolation_level=None)
     c = conn.cursor()
+    
+    # Enable WAL mode for better concurrency
+    c.execute("PRAGMA journal_mode=WAL")
     
     c.execute("UPDATE incidents SET status = 'cleared' WHERE status = 'active'")
     count = c.rowcount
+    
+    # Explicitly commit and close to ensure changes are visible immediately
     conn.commit()
     conn.close()
     
-    logger.info(f"Cleared {count} active incidents")
+    logger.info(f"Cleared {count} active incidents (changes committed and connection closed)")
     return count
 
 
@@ -250,4 +260,3 @@ def get_incident_count() -> Dict[str, int]:
     
     conn.close()
     return counts
-

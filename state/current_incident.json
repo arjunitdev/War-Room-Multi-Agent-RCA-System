@@ -1,0 +1,14 @@
+{
+  "alert_name": "Gateway Timeout (504) - Standard Network Issue",
+  "severity": "CRITICAL",
+  "triggered_agents": [
+    "Network Engineer"
+  ],
+  "logs": {
+    "db": "No database errors detected. All connections healthy.",
+    "network": "504 Gateway Timeout - Request ID: req-789. Timestamp: 2024-01-15T14:23:47Z. Response time: 30000ms. Load balancer: lb-prod-01. Target server: app-server-03. Connection timeout after 30 seconds. Retry attempts: 3 failed.",
+    "app_code_diff": "No recent code changes. Last deployment: 2024-01-14 10:00:00 (24 hours ago)."
+  },
+  "received_at": "2025-12-12T21:56:07.275031",
+  "status": "active"
+}

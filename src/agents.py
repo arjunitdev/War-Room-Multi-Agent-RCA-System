@@ -343,5 +343,17 @@ When analyzing code diffs, look for:
 - Resource management problems
 - Changes that could cause timeouts or deadlocks
 
+CRITICAL SEVERITY RULES:
+If you detect ANY of these patterns, you MUST mark the severity as 'Critical':
+- 'Full Table Scan' or 'Unoptimized Full Table Scan'
+- 'Memory Leak' or memory allocation issues
+- 'Infinite Loop' or unbounded loops
+- 'Breaking Change' in APIs or interfaces
+- Database connection leaks or transaction issues
+- Thread termination without cleanup
+- Unclosed resources or context managers
+
+Do NOT use 'Warning' for root cause patterns. Use 'Critical' for system-impacting issues.
+
 Provide specific evidence from the code diff and assess the severity (Critical, Warning, or Healthy).
 Be thorough but concise. Focus on actionable insights."""

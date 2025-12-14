@@ -65,7 +65,6 @@ def init_session_state() -> None:
         },
         "last_incident_count": 0,
         "force_troubleshoot": False,
-        "force_refresh_war_room": False,
     }
     for key, default_value in defaults.items():
         if key not in st.session_state:
@@ -115,7 +114,7 @@ def convert_payload_to_webhook_format(payload: Dict[str, Any]) -> Dict[str, Any]
     Server expects:
     - alert_name: str
     - severity: str
-    - source: str (DATABASE, NETWORK, or CODE)
+    - triggered_agents: list[str]
     - logs: Dict[str, str] with keys: "db", "network", "app_code_diff"
     
     Args:
@@ -125,6 +124,13 @@ def convert_payload_to_webhook_format(payload: Dict[str, Any]) -> Dict[str, Any]
         Webhook payload dictionary
     """
     source = payload["source"]
+    
+    # Map source to agent name
+    agent_map = {
+        "CODE": "Code Auditor",
+        "DATABASE": "DBA",
+        "NETWORK": "Network Engineer"
+    }
     
     # Map source to log key
     log_key_map = {
@@ -144,7 +150,7 @@ def convert_payload_to_webhook_format(payload: Dict[str, Any]) -> Dict[str, Any]
     return {
         "alert_name": payload["alert_name"],
         "severity": payload["severity"],
-        "source": payload["source"],
+        "triggered_agents": [agent_map[source]],
         "logs": logs_dict
     }
 
@@ -210,13 +216,8 @@ def render_chaos_simulator_tab() -> None:
                         st.session_state.judge_verdict = None
                         st.session_state.last_incident_check = None
                         st.session_state.force_troubleshoot = False
-                        st.session_state.last_incident_count = 0
                         
-                        # Set a flag to force War Room tab to refresh immediately
-                        st.session_state.force_refresh_war_room = True
-                        
-                        # Small delay to ensure database commit is complete
-                        time.sleep(0.5)
+                        time.sleep(0.3)
                         st.rerun()
                     else:
                         st.error(f"Failed to clear incidents: Status {response.status_code}")
@@ -250,9 +251,6 @@ def render_chaos_simulator_tab() -> None:
                     status_text.text(f"🚀 Sending {payload['source']} alert: {payload['alert_name']}...")
                     
                     try:
-                        # Log the payload being sent for debugging
-                        logger.debug(f"Sending payload {idx}/{total_payloads}: {webhook_payload}")
-                        
                         response = requests.post(
                             WEBHOOK_URL,
                             json=webhook_payload,
@@ -266,33 +264,18 @@ def render_chaos_simulator_tab() -> None:
                             successful_sends += 1
                             logger.info(f"Successfully sent payload {idx}/{total_payloads}: {payload['alert_name']}")
                         else:
-                            error_detail = response.text
-                            error_msg = f"❌ Failed to send {payload['source']} Alert: HTTP {response.status_code}"
-                            if error_detail:
-                                error_msg += f"\n\nError details: {error_detail[:200]}"
-                            status_text.error(error_msg)
                             st.toast(f"❌ Failed to send {payload['source']} Alert: {response.status_code}")
                             failed_sends += 1
                             logger.error(f"Failed to send payload {idx}/{total_payloads}: {response.status_code} - {response.text}")
                     
-                    except requests.exceptions.ConnectionError as e:
-                        error_msg = "❌ Cannot connect to webhook server. Is `server.py` running on port 8001?"
-                        status_text.error(error_msg)
+                    except requests.exceptions.ConnectionError:
+                        status_text.error("❌ Cannot connect to webhook server. Is `server.py` running?")
                         st.toast(f"❌ Connection error sending {payload['source']} Alert")
                         failed_sends += 1
-                        logger.error(f"Connection error sending payload {idx}/{total_payloads}: {e}")
                         break  # Stop if server is not available
                     
-                    except requests.exceptions.Timeout:
-                        error_msg = f"❌ Request timeout while sending {payload['source']} Alert. Server may be slow or unresponsive."
-                        status_text.error(error_msg)
-                        st.toast(f"❌ Timeout sending {payload['source']} Alert")
-                        failed_sends += 1
-                        logger.error(f"Timeout sending payload {idx}/{total_payloads}")
-                    
                     except Exception as e:
-                        error_msg = f"❌ Error sending payload: {str(e)}"
-                        status_text.error(error_msg)
+                        status_text.error(f"❌ Error sending payload: {str(e)}")
                         st.toast(f"❌ Error sending {payload['source']} Alert")
                         failed_sends += 1
                         logger.error(f"Error sending payload {idx}/{total_payloads}: {e}", exc_info=True)
@@ -416,8 +399,8 @@ def run_category_agent_analysis(
         raise Exception(error_msg)
 
 
-def display_agent_analysis(analysis: AgentAnalysis, container, incident_timestamp: str = None) -> None:
-    """Display a single agent's analysis with timeline information."""
+def display_agent_analysis(analysis: AgentAnalysis, container) -> None:
+    """Display a single agent's analysis."""
     with container:
         status_config = {
             "Critical": ("🚨", st.error),
@@ -427,30 +410,7 @@ def display_agent_analysis(analysis: AgentAnalysis, container, incident_timestam
         icon, display_func = status_config.get(analysis.status, ("❓", st.info))
         display_func(f"{icon} {analysis.status}")
         
-        # Calculate and display timeline information
-        timeline_info = ""
-        if incident_timestamp:
-            try:
-                # Parse the incident timestamp
-                from datetime import datetime
-                incident_dt = datetime.fromisoformat(incident_timestamp.replace('Z', '+00:00') if incident_timestamp.endswith('Z') else incident_timestamp)
-                
-                # Get the earliest incident timestamp from session state for T+0 reference
-                earliest_timestamp = st.session_state.get('earliest_incident_timestamp')
-                if earliest_timestamp:
-                    earliest_dt = datetime.fromisoformat(earliest_timestamp.replace('Z', '+00:00') if earliest_timestamp.endswith('Z') else earliest_timestamp)
-                    delta_seconds = int((incident_dt - earliest_dt).total_seconds())
-                    if delta_seconds == 0:
-                        timeline_info = " 🕒 T+0s"
-                    else:
-                        timeline_info = f" 🕒 T+{delta_seconds}s"
-                else:
-                    timeline_info = " 🕒 T+0s"
-            except Exception as e:
-                logger.warning(f"Failed to parse timestamp {incident_timestamp}: {e}")
-                timeline_info = ""
-        
-        st.markdown(f"**Agent:** {analysis.agent_name}{timeline_info}")
+        st.markdown(f"**Agent:** {analysis.agent_name}")
         st.markdown(f"**Hypothesis:** {analysis.hypothesis}")
         st.markdown(f"**Confidence:** {analysis.confidence_score:.1%}")
         
@@ -487,15 +447,6 @@ def render_war_room_tab(api_key: str) -> None:
             st.session_state.agent_results = None
             st.session_state.judge_verdict = None
             st.rerun()
-    
-    # Check if we need to force refresh (set by Clear All Incidents button)
-    if st.session_state.get("force_refresh_war_room", False):
-        logger.info("Force refresh triggered - clearing cached data and querying database immediately")
-        st.session_state.incident_data = None
-        st.session_state.agent_results = None
-        st.session_state.judge_verdict = None
-        st.session_state.last_incident_check = None
-        st.session_state.force_refresh_war_room = False  # Reset flag
     
     # Auto-polling: Check for new incidents from SQLite (always query fresh)
     incidents_by_category = check_incident_file()
@@ -794,33 +745,9 @@ def render_war_room_tab(api_key: str) -> None:
             # Display all agent hypotheses in a debate format
             num_agents = len(st.session_state.agent_results)
             if num_agents > 0:
-                # Calculate earliest timestamp for T+0 reference
-                all_incidents = []
-                for category_incidents in st.session_state.incident_data.values():
-                    if isinstance(category_incidents, list):
-                        all_incidents.extend(category_incidents)
-                
-                if all_incidents:
-                    # Find earliest timestamp
-                    earliest_timestamp = min(incident.get('received_at', '') for incident in all_incidents if incident.get('received_at'))
-                    st.session_state.earliest_incident_timestamp = earliest_timestamp
-                    
-                    # Create a mapping of agent names to their incident timestamps
-                    agent_timestamps = {}
-                    for incident in all_incidents:
-                        category = incident.get('category', '')
-                        timestamp = incident.get('received_at', '')
-                        if category == 'Network':
-                            agent_timestamps['Network Engineer'] = timestamp
-                        elif category == 'Database':
-                            agent_timestamps['DBA'] = timestamp
-                        elif category == 'Code':
-                            agent_timestamps['Code Auditor'] = timestamp
-                
                 cols = st.columns(num_agents)
                 for idx, (agent_name, analysis) in enumerate(st.session_state.agent_results.items()):
-                    incident_timestamp = agent_timestamps.get(agent_name, '')
-                    display_agent_analysis(analysis, cols[idx], incident_timestamp)
+                    display_agent_analysis(analysis, cols[idx])
         
         # Run Judge analysis if we have agent results and API key
         if api_key and not st.session_state.get("judge_verdict"):
@@ -849,19 +776,20 @@ def render_war_room_tab(api_key: str) -> None:
             
             verdict = st.session_state.judge_verdict
             
-            # Root cause headline with emphasis
-            st.success(f"**🎯 Root Cause:** {verdict.root_cause_headline}")
-            
-            # Root cause agent
-            st.info(f"**Primary Agent:** {verdict.root_cause_agent}")
+            # Final verdict with emphasis
+            st.success(f"**🎯 Root Cause:** {verdict.final_verdict}")
             
             # Detailed explanation
             with st.expander("📋 Detailed Analysis", expanded=True):
-                st.markdown("**Scenario Logic (Trigger -> Mechanism -> Symptom):**")
-                st.markdown(verdict.scenarios_logic)
+                st.markdown("**Root Cause Explanation:**")
+                st.markdown(verdict.root_cause)
                 
                 st.markdown("**Remediation Plan:**")
                 st.markdown(verdict.remediation_plan)
+                
+                st.markdown("**Agent Assessment:**")
+                for agent, assessment in verdict.agent_assessment.items():
+                    st.markdown(f"- **{agent}**: {assessment}")
     
     # Auto-refresh every POLL_INTERVAL seconds
     time.sleep(POLL_INTERVAL)

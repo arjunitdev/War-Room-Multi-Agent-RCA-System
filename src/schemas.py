@@ -38,25 +38,22 @@ class AgentAnalysis(BaseModel):
 class JudgeVerdict(BaseModel):
     """Structured output from the Judge agent's final decision."""
     
-    final_verdict: str = Field(
+    root_cause_headline: str = Field(
         ..., 
-        description="The final root cause determination",
+        description="The one-sentence summary of the failure",
         min_length=20
     )
-    root_cause: str = Field(
+    root_cause_agent: str = Field(
         ..., 
-        description="Detailed explanation of the root cause",
+        description="The agent who found the PRIMARY failure (e.g., 'Code Auditor', 'DBA', 'Network Engineer')"
+    )
+    scenarios_logic: str = Field(
+        ..., 
+        description="Explain the chain: Trigger -> Mechanism -> Symptom",
         min_length=50
     )
     remediation_plan: str = Field(
         ..., 
-        description="Step-by-step plan to fix the issue",
+        description="Specific technical steps to fix the root cause (e.g., 'Wrap JSON parsing in try/finally')",
         min_length=30
     )
-    agent_assessment: Dict[str, str] = Field(
-        ..., 
-        description="Assessment of each agent's correctness (e.g., {'DBA': 'Correct', 'Network': 'Partially correct', 'Code Auditor': 'Correct'})"
-    )
-
-
-

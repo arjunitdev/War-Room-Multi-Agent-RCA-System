@@ -45,37 +45,36 @@ class IncidentPayload(BaseModel):
     """Pydantic model for incident webhook payload."""
     alert_name: str
     severity: str
-    triggered_agents: list[str]  # List of agent names that should analyze this
-    logs: Dict[str, str]  # Dictionary with db, network, app_code_diff logs
+    source: str  # DATABASE, NETWORK, or CODE
+    logs: Dict[str, str]
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy", "service": "war-room-webhook-server"}
 
 
 def get_category_from_incident(payload: Dict[str, Any]) -> str:
-    """Determine category from incident payload."""
-    triggered_agents = payload.get("triggered_agents", [])
+    """Determine category from incident payload using source field."""
+    source = payload.get("source", "")
     alert_name = payload.get("alert_name", "")
     
-    logger.info(f"Determining category for: alert_name='{alert_name}', triggered_agents={triggered_agents}")
+    logger.info(f"Determining category for: alert_name='{alert_name}', source='{source}'")
     
-    # Check triggered_agents first (most reliable indicator)
-    if isinstance(triggered_agents, list) and len(triggered_agents) > 0:
-        for agent in triggered_agents:
-            agent_str = str(agent)
-            agent_lower = agent_str.lower()
-            
-            # Check for Network Engineer
-            if "network" in agent_lower and "engineer" in agent_lower:
-                logger.info(f"✅ Category: Network (from agent: '{agent_str}')")
-                return "Network"
-            # Check for DBA
-            elif "dba" in agent_lower:
-                logger.info(f"✅ Category: Database (from agent: '{agent_str}')")
-                return "Database"
-            # Check for Code Auditor
-            elif "code" in agent_lower and "auditor" in agent_lower:
-                logger.info(f"✅ Category: Code (from agent: '{agent_str}')")
-                return "Code"
+    # Use source field to determine category (architectural purity)
+    source_upper = source.upper()
+    if source_upper == "DATABASE":
+        logger.info(f"✅ Category: Database (from source: '{source}')")
+        return "Database"
+    elif source_upper == "NETWORK":
+        logger.info(f"✅ Category: Network (from source: '{source}')")
+        return "Network"
+    elif source_upper == "CODE":
+        logger.info(f"✅ Category: Code (from source: '{source}')")
+        return "Code"
     
-    # Fallback to alert_name if triggered_agents didn't match
+    # Fallback to alert_name if source didn't match
     alert_name_lower = alert_name.lower()
     if "network" in alert_name_lower or alert_name.startswith("NET_"):
         logger.info(f"✅ Category: Network (from alert_name)")
@@ -87,14 +86,8 @@ def get_category_from_incident(payload: Dict[str, Any]) -> str:
         logger.info(f"✅ Category: Code (from alert_name)")
         return "Code"
     
-    logger.warning(f"⚠️ Could not determine category for incident: alert_name='{alert_name}', triggered_agents={triggered_agents}")
+    logger.warning(f"⚠️ Could not determine category for incident: alert_name='{alert_name}', source='{source}'")
     return "Unknown"
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "war-room-webhook-receiver"}
 
 
 @app.post("/webhook/trigger")
@@ -108,48 +101,36 @@ async def trigger_incident(payload: IncidentPayload):
     try:
         logger.info(f"🔥 Alert Received: {payload.alert_name}")
         logger.info(f"   Severity: {payload.severity}")
-        logger.info(f"   Triggered Agents: {payload.triggered_agents}")
+        logger.info(f"   Source: {payload.source}")
         
         # Determine category
         payload_dict = payload.model_dump()
         category = get_category_from_incident(payload_dict)
         
+        # Determine which agent should analyze this based on category (architectural purity)
+        triggered_agents = []
+        if category == "Database":
+            triggered_agents = ["DBA"]
+        elif category == "Network":
+            triggered_agents = ["Network Engineer"]
+        elif category == "Code":
+            triggered_agents = ["Code Auditor"]
+        
         # Save to SQLite database (thread-safe!)
         try:
             logger.info(f"Attempting to save incident: category={category}, alert={payload.alert_name}")
-            logger.info(f"  triggered_agents={payload.triggered_agents}")
+            logger.info(f"  derived_agents={triggered_agents}")
             logger.info(f"  severity={payload.severity}")
             
             incident_id = save_incident(
                 category=category,
                 alert_name=payload.alert_name,
                 severity=payload.severity,
-                triggered_agents=payload.triggered_agents,
+                triggered_agents=triggered_agents,
                 logs=payload.logs
             )
             
             logger.info(f"✅ Incident saved to database: ID={incident_id}, category={category}")
-            
-            # Verify it was saved immediately
-            from src.db import get_active_incidents, DB_FILE
-            logger.info(f"Verifying save in database: {DB_FILE.absolute()}")
-            verify_incidents = get_active_incidents()
-            total = sum(len(v) for v in verify_incidents.values())
-            logger.info(f"Database now contains {total} active incident(s)")
-            
-            # Double-check by querying the specific incident
-            import sqlite3
-            verify_conn = sqlite3.connect(DB_FILE)
-            verify_c = verify_conn.cursor()
-            verify_c.execute("SELECT id, category, alert_name, status FROM incidents WHERE id = ?", (incident_id,))
-            verify_row = verify_c.fetchone()
-            verify_conn.close()
-            
-            if verify_row:
-                logger.info(f"✅ Verification successful: Incident ID {incident_id} found in database")
-            else:
-                logger.error(f"❌ Verification FAILED: Incident ID {incident_id} NOT found in database!")
-                raise Exception(f"Incident was not saved to database (ID: {incident_id})")
             
         except Exception as save_error:
             logger.error(f"❌ Failed to save incident to database: {save_error}")
@@ -160,7 +141,7 @@ async def trigger_incident(payload: IncidentPayload):
         return {
             "status": "success",
             "message": f"Incident '{payload.alert_name}' received and stored",
-            "triggered_agents": payload.triggered_agents,
+            "triggered_agents": triggered_agents,
             "incident_id": incident_id
         }
         
@@ -179,7 +160,7 @@ async def clear_current_incident():
 
 
 @app.post("/webhook/clear/{category}")
-async def clear_category_incidents(category: str):
+async def clear_category_incidents_endpoint(category: str):
     """Clear incidents for a specific category."""
     count = clear_category_incidents(category)
     if count > 0:
@@ -200,7 +181,6 @@ if __name__ == "__main__":
     import uvicorn
     from src.db import ensure_db_dir
     ensure_db_dir()  # Ensure database directory exists
-    logger.info("Starting War Room Webhook Receiver on http://localhost:8000")
+    logger.info("Starting War Room Webhook Receiver on http://localhost:8001")
     logger.info("Server code version: Enhanced with verification logging")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")

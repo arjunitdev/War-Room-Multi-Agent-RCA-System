@@ -128,4 +128,3 @@ def _clean_property(prop: Dict[str, Any]) -> Dict[str, Any]:
             ]
     
     return cleaned
-

@@ -139,7 +139,7 @@ class JudgeAgent:
             logger.error(error_msg)
             raise ValueError(error_msg)
     
-    def adjudicate(self, analyses: List[AgentAnalysis]) -> JudgeVerdict:
+    def synthesize_verdict(self, analyses: List[AgentAnalysis]) -> JudgeVerdict:
         """
         Synthesize multiple agent analyses to determine the true root cause.
         
@@ -235,35 +235,44 @@ class JudgeAgent:
             for analysis in analyses
         ])
         
-        return f"""You are a Senior Principal Engineer and Incident Commander in the War Room. You are reviewing reports from specialist agents who have analyzed different aspects of an incident.
+        JUDGE_ROLE = """You are a Senior Principal Engineer and Incident Commander.
+Your Goal: Synthesize reports from Network, DBA, and Code Agents to find the single **Root Cause**.
 
-CRITICAL WARNING: Some errors are just SYMPTOMS, not root causes. You must identify the PRIMARY root cause that started the chain of failures.
+### THE HIERARCHY OF CAUSALITY (Use this to find the Root Cause)
 
-Your task is to:
-1. Review all the agent analyses below
-2. Determine the TRUE root cause by finding the causal link between their findings
-3. Distinguish between ROOT CAUSES and CASCADING SYMPTOMS
-4. Explain who is right, who is partially right, and how the events triggered each other
-5. Provide a clear, actionable remediation plan
+1. **CODE LOGIC IS KING (The "Bug" Check):**
+   - If the Code Auditor finds a **LOGIC ERROR** (e.g., `JSONDecodeError`, `KeyError`, `ValueError`, `NullPointer`, `DivisionByZero`), **THIS IS THE ROOT CAUSE.**
+   - *Reasoning:* These are internal code failures that happen regardless of infrastructure health.
 
-KEY PRINCIPLES:
-- If you see a DB Deadlock AND a Network Timeout → The Deadlock is the ROOT CAUSE, the Timeout is a SYMPTOM
-- If you see High Latency AND a Memory Leak → The Code (Memory Leak) is the ROOT CAUSE, Latency is a SYMPTOM
-- If you see DNS Failure AND DB Connection Issues → DNS Failure is the ROOT CAUSE, DB issues are SYMPTOMS
-- One primary issue can cause multiple secondary failures
+2. **INFRASTRUCTURE EXCEPTIONS ARE NUANCED:**
+   - If the Code Auditor *only* finds **CONNECTIVITY ERRORS** (e.g., `ConnectionRefused`, `Timeout`, `503 Service Unavailable`), **DO NOT** automatically blame the code.
+   - CHECK THE DBA:
+     - If DBA shows "Deadlocks" or "Sleep > 10s" -> **Database is Root Cause.**
+     - If DBA is Healthy -> **Network/Infrastructure is Root Cause.**
+
+3. **DATABASE IS SECONDARY:**
+   - If Code is totally healthy (no logic errors), look at the DBA.
+   - **Deadlocks** (Error 1213) or **Lock Wait Timeouts** are the Root Cause here.
+   - *Note:* If the DB is full of "Sleeping" connections, blame the **Code** only if the Code Auditor also shows a missing close/rollback (Logic Error).
+
+### TIMELINE FORENSICS
+- **Look at the Timestamps:** The event that happened at **T+0s** is the trigger.
+- If a `JSONDecodeError` (Code) happens at T+0, and DB Connections spike at T+2, the Code is guilty.
+
+### OUTPUT FORMAT (JSON)
+{
+  "root_cause_headline": "The one-sentence summary of the failure.",
+  "root_cause_agent": "The agent who found the PRIMARY failure.",
+  "scenarios_logic": "Explain the chain: Trigger -> Mechanism -> Symptom.",
+  "remediation_plan": "Specific technical steps (e.g., 'Wrap JSON parsing in try/finally')."
+}"""
+        
+        return f"""{JUDGE_ROLE}
 
 Agent Reports:
 {analyses_text}
 
-Synthesize these findings and determine the root cause. Your analysis MUST include:
-
-1. ROOT CAUSE: The primary issue that started everything (be specific)
-2. CASCADING EFFECTS: What other systems broke because of the root cause (list them)
-3. SEQUENCE OF EVENTS: The timeline showing how the root cause led to symptoms
-4. THE FIX: What needs to be fixed first (address the root cause, not just symptoms)
-5. AGENT ASSESSMENT: Which agent(s) identified the root cause correctly, and which observed symptoms
-
-Be decisive, specific, and provide actionable guidance. Focus on fixing the origin, not just the symptoms."""
+Synthesize these findings and determine the root cause. Follow the hierarchy of causality above and provide your analysis in the specified JSON format."""
     
     def _parse_response(self, response) -> JudgeVerdict:
         """
