@@ -31,3 +31,5 @@ Thumbs.db
 Frontend/dist/
 Frontend/build/
 Frontend/node_modules/
+
+.vercel
