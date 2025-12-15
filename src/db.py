@@ -110,7 +110,7 @@ def save_incident(
         conn.commit()
         conn.close()
         
-        logger.info(f"✅ Incident saved to database: ID={incident_id}, category={category}, alert={alert_name}")
+        logger.info(f"Incident saved to database: ID={incident_id}, category={category}, alert={alert_name}")
         
         # Verify it was saved
         verify_conn = sqlite3.connect(DB_FILE)
@@ -122,7 +122,7 @@ def save_incident(
         
         return incident_id
     except Exception as e:
-        logger.error(f"❌ Failed to save incident: {e}")
+        logger.error(f"Failed to save incident: {e}")
         import traceback
         logger.error(traceback.format_exc())
         raise

@@ -1,1 +1,33 @@
+# Environment variables
+.env
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# State files
+state/*.json
+state/*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+Frontend/dist/
+Frontend/build/
+Frontend/node_modules/

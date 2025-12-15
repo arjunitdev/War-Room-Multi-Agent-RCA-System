@@ -65,28 +65,28 @@ def get_category_from_incident(payload: Dict[str, Any]) -> str:
     # Use source field to determine category (architectural purity)
     source_upper = source.upper()
     if source_upper == "DATABASE":
-        logger.info(f"✅ Category: Database (from source: '{source}')")
+        logger.info(f"Category: Database (from source: '{source}')")
         return "Database"
     elif source_upper == "NETWORK":
-        logger.info(f"✅ Category: Network (from source: '{source}')")
+        logger.info(f"Category: Network (from source: '{source}')")
         return "Network"
     elif source_upper == "CODE":
-        logger.info(f"✅ Category: Code (from source: '{source}')")
+        logger.info(f"Category: Code (from source: '{source}')")
         return "Code"
     
     # Fallback to alert_name if source didn't match
     alert_name_lower = alert_name.lower()
     if "network" in alert_name_lower or alert_name.startswith("NET_"):
-        logger.info(f"✅ Category: Network (from alert_name)")
+        logger.info(f"Category: Network (from alert_name)")
         return "Network"
     elif "database" in alert_name_lower or "db_" in alert_name_lower or alert_name.startswith("DB_"):
-        logger.info(f"✅ Category: Database (from alert_name)")
+        logger.info(f"Category: Database (from alert_name)")
         return "Database"
     elif "code" in alert_name_lower or alert_name.startswith("CODE_"):
-        logger.info(f"✅ Category: Code (from alert_name)")
+        logger.info(f"Category: Code (from alert_name)")
         return "Code"
     
-    logger.warning(f"⚠️ Could not determine category for incident: alert_name='{alert_name}', source='{source}'")
+    logger.warning(f"Could not determine category for incident: alert_name='{alert_name}', source='{source}'")
     return "Unknown"
 
 
@@ -99,7 +99,7 @@ async def trigger_incident(payload: IncidentPayload):
     Each webhook is completely independent and triggers only its specified agents.
     """
     try:
-        logger.info(f"🔥 Alert Received: {payload.alert_name}")
+        logger.info(f"Alert Received: {payload.alert_name}")
         logger.info(f"   Severity: {payload.severity}")
         logger.info(f"   Source: {payload.source}")
         
@@ -130,10 +130,10 @@ async def trigger_incident(payload: IncidentPayload):
                 logs=payload.logs
             )
             
-            logger.info(f"✅ Incident saved to database: ID={incident_id}, category={category}")
+            logger.info(f"Incident saved to database: ID={incident_id}, category={category}")
             
         except Exception as save_error:
-            logger.error(f"❌ Failed to save incident to database: {save_error}")
+            logger.error(f"Failed to save incident to database: {save_error}")
             import traceback
             logger.error(traceback.format_exc())
             raise
