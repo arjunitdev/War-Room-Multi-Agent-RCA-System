@@ -320,9 +320,6 @@ async def run_troubleshoot_analysis(request: TroubleshootRequest):
         if not api_key:
             raise HTTPException(status_code=400, detail="API key not found in request or environment variables")
         
-        # For leaked API keys, we'll use mock mode - skip early validation
-        api_key_valid = True  # We'll determine this during agent execution
-        
         # Get active incidents
         incidents_by_category = get_active_incidents()
         
@@ -356,43 +353,35 @@ async def run_troubleshoot_analysis(request: TroubleshootRequest):
         # Run agent analysis in parallel
         agent_results = {}
         
-        # Try real agents first, fall back to mock if they fail
-        try:
-            # Use real AI agents
-            with ThreadPoolExecutor(max_workers=len(agents_to_call)) as executor:
-                futures = {
-                    executor.submit(
-                        run_category_agent_analysis,
-                        api_key,
-                        incidents_by_category,
-                        category,
-                        agent_name,
-                        agent_role,
-                        force_analysis=request.force_all_agents
-                    ): (agent_name, category)
-                    for agent_name, agent_role, category in agents_to_call
-                }
-                
-                for future in futures:
-                    agent_name, category = futures[future]
-                    try:
-                        result = future.result()
-                        if result:
-                            agent_results[agent_name] = result
-                    except Exception as e:
-                        logger.error(f"Agent {agent_name} failed: {e}")
-        except Exception as e:
-            logger.warning(f"Real agent execution failed: {e}")
-            # Fall back to mock agents
-            logger.info("Using mock agents due to real agent failures")
-            agent_results = create_mock_agent_results(agents_to_call, incidents_by_category)
-            logger.info(f"Created {len(agent_results)} mock agent results")
+        with ThreadPoolExecutor(max_workers=len(agents_to_call)) as executor:
+            futures = {
+                executor.submit(
+                    run_category_agent_analysis,
+                    api_key,
+                    incidents_by_category,
+                    category,
+                    agent_name,
+                    agent_role,
+                    force_analysis=request.force_all_agents
+                ): (agent_name, category)
+                for agent_name, agent_role, category in agents_to_call
+            }
             
-        # If no agent results from real agents, use mock agents
+            for future in futures:
+                agent_name, category = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        agent_results[agent_name] = result
+                except Exception as e:
+                    logger.error(f"Agent {agent_name} failed: {e}")
+                    raise
+        
         if not agent_results:
-            logger.info("No real agent results - using mock agents for demonstration")
-            agent_results = create_mock_agent_results(agents_to_call, incidents_by_category)
-            logger.info(f"Created {len(agent_results)} mock agent results")
+            raise HTTPException(
+                status_code=500,
+                detail="No agent results produced. Check API key validity and agent execution logs."
+            )
         
         # Convert agent results to response format
         agent_responses = []
@@ -425,18 +414,6 @@ async def run_troubleshoot_analysis(request: TroubleshootRequest):
             except Exception as e:
                 judge_error = str(e)
                 logger.error(f"Judge analysis failed: {e}")
-                # Check if it's an API key issue or use mock judge
-                if "leaked" in str(e).lower() or "403" in str(e):
-                    judge_error = None  # Clear error for mock mode
-                    logger.info("Using mock judge due to API key issues")
-                    
-                # Use mock judge verdict when real judge fails
-                judge_verdict = JudgeVerdictResponse(
-                    root_cause_headline="DNS Infrastructure Failure",
-                    root_cause_agent="Network Engineer",
-                    scenarios_logic="The primary DNS server failure is the triggering event that initiated this cascading incident. Analysis shows:\n\n1. Network layer: Complete DNS resolution failure preventing service discovery\n2. Database layer: Replication lag caused by network connectivity issues\n3. Application layer: Circuit breakers opening to protect services from cascading failures\n\nThe incident propagated from infrastructure → data → application layers.",
-                    remediation_plan="1. Immediate failover to backup DNS infrastructure\n2. Investigate root cause of primary DNS server failure\n3. Reset application circuit breakers after DNS recovery\n4. Monitor database replication lag until normal sync resumes\n5. Review DNS redundancy and failover automation"
-                )
         
         return {
             "status": "success",
@@ -451,58 +428,6 @@ async def run_troubleshoot_analysis(request: TroubleshootRequest):
     except Exception as e:
         logger.error(f"Error running troubleshoot analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def create_mock_agent_results(agents_to_call, incidents_by_category) -> Dict[str, AgentAnalysis]:
-    """Create mock agent results for demonstration when API key is invalid."""
-    from src.schemas import AgentAnalysis
-    
-    mock_results = {}
-    
-    for agent_name, agent_role, category in agents_to_call:
-        incidents = incidents_by_category.get(category, [])
-        
-        if category == "Network":
-            mock_results[agent_name] = AgentAnalysis(
-                agent_name=agent_name,
-                status="Critical",
-                hypothesis="DNS resolution failure causing cascading timeouts",
-                confidence_score=0.92,
-                evidence_cited=[
-                    "DNS server unresponsive to queries",
-                    "Failed to resolve api.production.internal", 
-                    "Fallback DNS showing degraded performance"
-                ],
-                reasoning="Primary DNS infrastructure has failed, causing all service discovery mechanisms to timeout. This explains the widespread connectivity failures across multiple services and load balancers."
-            )
-        elif category == "Database":
-            mock_results[agent_name] = AgentAnalysis(
-                agent_name=agent_name,
-                status="Warning",
-                hypothesis="Replication lag secondary to network instability",
-                confidence_score=0.78,
-                evidence_cited=[
-                    "Replica lag measured at 47 seconds",
-                    "Write operation failed on replica node-3",
-                    "Replication sync state degraded"
-                ],
-                reasoning="Database replication issues appear to be a downstream symptom of network connectivity problems. The replica nodes are struggling to maintain synchronization due to intermittent connection failures."
-            )
-        elif category == "Code":
-            mock_results[agent_name] = AgentAnalysis(
-                agent_name=agent_name,
-                status="Critical", 
-                hypothesis="Circuit breaker activation due to dependency failures",
-                confidence_score=0.85,
-                evidence_cited=[
-                    "Circuit breaker OPEN state for payment-service",
-                    "95% request timeout rate observed",
-                    "Service mesh proxy experiencing crash loops"
-                ],
-                reasoning="Application layer circuit breakers have correctly opened to protect downstream services. This is expected behavior given the upstream network failures, though it results in service degradation."
-            )
-    
-    return mock_results
 
 
 def run_category_agent_analysis(
